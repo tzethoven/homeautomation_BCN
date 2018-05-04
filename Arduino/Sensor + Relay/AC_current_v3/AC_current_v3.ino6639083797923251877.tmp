@@ -1,0 +1,70 @@
+#include <UnoWiFiDevEd.h>
+
+// Define communication parameters
+
+#define CONNECTOR "mqtt"
+#define TOPIC_SENS "arduino/current_sensor"
+#define TOPIC_REL_COM "arduino/relay/command"
+#define TOPIC_REL_STAT "arduino/relay/state"
+
+// Constants for calculating RMS
+
+const double AmpPerBit = 5/(0.185*1023); // use 0.100 for 20A Module and 0.066 for 30A Module
+const int sampleDuration = 200; // milliseconds
+const double rawZero = 511;       // 511=1023/2 It should be measured to calibrate the sensor
+const int Vnet = 230;
+const float loopFreq = 500; // milliseconds
+
+
+
+
+void setup(){
+    
+  Ciao.begin();  // Connect to MQTT broker
+
+  Serial.begin(9600);
+  
+  pinMode(7, OUTPUT);
+  digitalWrite(7, HIGH);
+}
+
+void loop() {
+
+  
+  // Calculate RMS current consumption
+  
+  int sampleCount = 0;
+  double rawSquaredSum = 0;
+  uint32_t startTime = millis();  
+  
+  while((millis() - startTime) < sampleDuration) {
+    float rawValue = analogRead(A0) - rawZero;
+    rawSquaredSum += rawValue * rawValue;
+    sampleCount++;
+  }
+  double Irms = sqrt(rawSquaredSum / sampleCount) * AmpPerBit;
+
+  // Publish current to sensor topic
+  
+  Ciao.write(CONNECTOR, TOPIC_SENS, String(Irms));
+  
+  
+  // Subscribe to command topic
+  
+  CiaoData c_data = Ciao.read(CONNECTOR, TOPIC_REL_COM);
+  if (!c_data.isEmpty()) {
+    String command = c_data.get(2);
+    if (command.equals(String("ON"))) {digitalWrite(7, LOW);}
+    if (command.equals(String("OFF"))) {digitalWrite(7, HIGH);}
+  }
+
+
+  // Publish relay status
+  
+  if (!bitRead(PORTD, 7)) {Ciao.write(CONNECTOR, TOPIC_REL_STAT, "ON");}
+  if (bitRead(PORTD, 7)) {Ciao.write(CONNECTOR, TOPIC_REL_STAT, "OFF");}
+  
+  while ((millis() - startTime) < loopFreq);
+}
+
+
